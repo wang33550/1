@@ -1,5 +1,8 @@
 # Task Recovery Runtime
 
+[![CI](https://github.com/wang33550/1/actions/workflows/ci.yml/badge.svg)](https://github.com/wang33550/1/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 Task Recovery Runtime (`trr`) is a cross-model state layer for coding agents. It turns long conversations and tool activity into structured checkpoints so an agent can continue from the current task frontier instead of redoing work after context compaction.
 
 Status: `0.1.x developer preview`
