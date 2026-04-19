@@ -1,0 +1,17 @@
+[
+  {
+    "content": "Inspect flaky auth test",
+    "status": "completed",
+    "activeForm": "Inspecting auth test"
+  },
+  {
+    "content": "Patch token refresh logic",
+    "status": "in_progress",
+    "activeForm": "Patching token refresh"
+  },
+  {
+    "content": "Run auth test suite",
+    "status": "pending",
+    "activeForm": "Running tests"
+  }
+]

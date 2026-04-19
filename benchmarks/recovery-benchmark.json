@@ -1,0 +1,541 @@
+{
+  "name": "Synthetic Recovery Benchmark v1",
+  "description": "Synthetic coding-agent recovery scenarios with deterministic expectations.",
+  "scenarios": [
+    {
+      "id": "auth_flaky_fix",
+      "description": "Recover during an auth test fix without losing the schema constraint.",
+      "minTailEvents": 2,
+      "events": [
+        {
+          "kind": "user_message",
+          "payload": {
+            "text": "Fix the flaky auth test without changing the database schema."
+          }
+        },
+        {
+          "kind": "decision",
+          "payload": {
+            "category": "constraint",
+            "text": "Do not modify database schema.",
+            "pinned": true
+          }
+        },
+        {
+          "kind": "file_read",
+          "payload": {
+            "path": "src/auth/tokens.ts",
+            "startLine": 1,
+            "endLine": 220
+          }
+        },
+        {
+          "kind": "command_exec",
+          "payload": {
+            "command": "vitest tests/auth/token-refresh.test.ts",
+            "dependsOnPaths": [
+              "src/auth/tokens.ts",
+              "tests/auth/token-refresh.test.ts"
+            ],
+            "exitCode": 1,
+            "summary": "1 failing test: refreshes expired sessions"
+          }
+        },
+        {
+          "kind": "plan_update",
+          "payload": {
+            "items": [
+              {
+                "id": "inspect",
+                "text": "Inspect flaky auth test",
+                "status": "done"
+              },
+              {
+                "id": "patch",
+                "text": "Patch token refresh logic",
+                "status": "in_progress"
+              },
+              {
+                "id": "verify",
+                "text": "Run auth test suite",
+                "status": "pending"
+              }
+            ],
+            "nextAction": "Patch token refresh logic"
+          }
+        },
+        {
+          "kind": "file_write",
+          "payload": {
+            "path": "src/auth/tokens.ts",
+            "summary": "Adjusted token refresh timing to avoid race conditions.",
+            "afterHash": "hash-auth-1"
+          }
+        }
+      ],
+      "expected": {
+        "nextAction": "Patch token refresh logic",
+        "requiredConstraints": [
+          "Do not modify database schema."
+        ],
+        "requiredArtifacts": [
+          "Adjusted token refresh timing to avoid race conditions."
+        ],
+        "candidateActions": [
+          {
+            "actionType": "file_read",
+            "path": "src/auth/tokens.ts",
+            "startLine": 1,
+            "endLine": 220
+          },
+          {
+            "actionType": "command_exec",
+            "command": "vitest tests/auth/token-refresh.test.ts",
+            "dependsOnPaths": [
+              "src/auth/tokens.ts",
+              "tests/auth/token-refresh.test.ts"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "release_hotfix_deployed",
+      "description": "Recover after deploying a hotfix and avoid redeploying the same build.",
+      "minTailEvents": 2,
+      "events": [
+        {
+          "kind": "user_message",
+          "payload": {
+            "text": "Patch the readiness check bug and avoid changing deployment manifests."
+          }
+        },
+        {
+          "kind": "decision",
+          "payload": {
+            "category": "constraint",
+            "text": "Do not change deployment manifests.",
+            "pinned": true
+          }
+        },
+        {
+          "kind": "file_write",
+          "payload": {
+            "path": "src/server/readiness.ts",
+            "summary": "Guarded readiness check against null upstream state.",
+            "afterHash": "hash-release-1"
+          }
+        },
+        {
+          "kind": "command_exec",
+          "payload": {
+            "command": "kubectl rollout restart deploy/api",
+            "sideEffect": true,
+            "summary": "Rolled out the api deployment."
+          }
+        },
+        {
+          "kind": "plan_update",
+          "payload": {
+            "items": [
+              {
+                "id": "patch",
+                "text": "Patch readiness check",
+                "status": "done"
+              },
+              {
+                "id": "release-notes",
+                "text": "Update release notes and notify on-call",
+                "status": "in_progress"
+              }
+            ],
+            "nextAction": "Update release notes and notify on-call"
+          }
+        },
+        {
+          "kind": "file_read",
+          "payload": {
+            "path": "docs/releases/current.md",
+            "startLine": 1,
+            "endLine": 120
+          }
+        }
+      ],
+      "expected": {
+        "nextAction": "Update release notes and notify on-call",
+        "requiredConstraints": [
+          "Do not change deployment manifests."
+        ],
+        "requiredArtifacts": [
+          "Rolled out the api deployment."
+        ],
+        "candidateActions": [
+          {
+            "actionType": "file_read",
+            "path": "docs/releases/current.md",
+            "startLine": 1,
+            "endLine": 120
+          }
+        ],
+        "sideEffectActions": [
+          {
+            "actionType": "command_exec",
+            "command": "kubectl rollout restart deploy/api",
+            "sideEffect": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "windows_log_rotation",
+      "description": "Recover a Windows-specific bugfix where the next action is only present in the archived plan.",
+      "minTailEvents": 2,
+      "events": [
+        {
+          "kind": "user_message",
+          "payload": {
+            "text": "Fix the Windows log rotation bug without touching the service registry."
+          }
+        },
+        {
+          "kind": "decision",
+          "payload": {
+            "category": "constraint",
+            "text": "Do not modify the Windows service registry.",
+            "pinned": true
+          }
+        },
+        {
+          "kind": "file_read",
+          "payload": {
+            "path": "src/windows/log-rotation.ts",
+            "startLine": 1,
+            "endLine": 240
+          }
+        },
+        {
+          "kind": "plan_update",
+          "payload": {
+            "items": [
+              {
+                "id": "patch",
+                "text": "Patch Windows path normalization",
+                "status": "in_progress"
+              },
+              {
+                "id": "verify",
+                "text": "Run Windows log rotation tests",
+                "status": "pending"
+              }
+            ],
+            "nextAction": "Patch Windows path normalization"
+          }
+        },
+        {
+          "kind": "file_write",
+          "payload": {
+            "path": "src/windows/log-rotation.ts",
+            "summary": "Normalized Windows volume prefixes before retention checks.",
+            "afterHash": "hash-win-1"
+          }
+        },
+        {
+          "kind": "command_exec",
+          "payload": {
+            "command": "vitest tests/windows/log-rotation.test.ts",
+            "dependsOnPaths": [
+              "src/windows/log-rotation.ts",
+              "tests/windows/log-rotation.test.ts"
+            ],
+            "exitCode": 0,
+            "summary": "3 Windows log rotation tests passed"
+          }
+        }
+      ],
+      "expected": {
+        "nextAction": "Patch Windows path normalization",
+        "requiredConstraints": [
+          "Do not modify the Windows service registry."
+        ],
+        "requiredArtifacts": [
+          "Normalized Windows volume prefixes before retention checks."
+        ],
+        "candidateActions": [
+          {
+            "actionType": "command_exec",
+            "command": "vitest tests/windows/log-rotation.test.ts",
+            "dependsOnPaths": [
+              "src/windows/log-rotation.ts",
+              "tests/windows/log-rotation.test.ts"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "api_contract_refactor",
+      "description": "Recover an API refactor while preserving the response contract.",
+      "minTailEvents": 2,
+      "events": [
+        {
+          "kind": "user_message",
+          "payload": {
+            "text": "Refactor the user serializer but preserve the public response schema."
+          }
+        },
+        {
+          "kind": "decision",
+          "payload": {
+            "category": "constraint",
+            "text": "Preserve the public response schema.",
+            "pinned": true
+          }
+        },
+        {
+          "kind": "file_read",
+          "payload": {
+            "path": "src/api/user-controller.ts",
+            "startLine": 1,
+            "endLine": 200
+          }
+        },
+        {
+          "kind": "plan_update",
+          "payload": {
+            "items": [
+              {
+                "id": "extract",
+                "text": "Extract shared serializer helper",
+                "status": "in_progress"
+              },
+              {
+                "id": "verify",
+                "text": "Run user API snapshot tests",
+                "status": "pending"
+              }
+            ],
+            "nextAction": "Extract shared serializer helper"
+          }
+        },
+        {
+          "kind": "file_write",
+          "payload": {
+            "path": "src/api/user-serializer.ts",
+            "summary": "Extracted a dedicated user serializer helper.",
+            "afterHash": "hash-api-1"
+          }
+        },
+        {
+          "kind": "command_exec",
+          "payload": {
+            "command": "vitest tests/api/user-snapshots.test.ts",
+            "dependsOnPaths": [
+              "src/api/user-serializer.ts",
+              "tests/api/user-snapshots.test.ts"
+            ],
+            "exitCode": 0,
+            "summary": "User snapshot tests passed"
+          }
+        }
+      ],
+      "expected": {
+        "nextAction": "Extract shared serializer helper",
+        "requiredConstraints": [
+          "Preserve the public response schema."
+        ],
+        "requiredArtifacts": [
+          "Extracted a dedicated user serializer helper."
+        ],
+        "candidateActions": [
+          {
+            "actionType": "command_exec",
+            "command": "vitest tests/api/user-snapshots.test.ts",
+            "dependsOnPaths": [
+              "src/api/user-serializer.ts",
+              "tests/api/user-snapshots.test.ts"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "billing_backfill_complete",
+      "description": "Recover after a one-time backfill so the runtime can stop a repeated side effect.",
+      "minTailEvents": 2,
+      "events": [
+        {
+          "kind": "user_message",
+          "payload": {
+            "text": "Patch billing retry labels without adding a migration."
+          }
+        },
+        {
+          "kind": "decision",
+          "payload": {
+            "category": "constraint",
+            "text": "Do not add a migration.",
+            "pinned": true
+          }
+        },
+        {
+          "kind": "file_write",
+          "payload": {
+            "path": "src/billing/retry-labels.ts",
+            "summary": "Normalized billing retry labels for failed invoices.",
+            "afterHash": "hash-bill-1"
+          }
+        },
+        {
+          "kind": "command_exec",
+          "payload": {
+            "command": "python scripts/backfill_retry_labels.py --apply",
+            "sideEffect": true,
+            "summary": "Applied billing retry label backfill."
+          }
+        },
+        {
+          "kind": "plan_update",
+          "payload": {
+            "items": [
+              {
+                "id": "patch",
+                "text": "Patch billing retry labels",
+                "status": "done"
+              },
+              {
+                "id": "document",
+                "text": "Document the one-time backfill and close the task",
+                "status": "in_progress"
+              }
+            ],
+            "nextAction": "Document the one-time backfill and close the task"
+          }
+        },
+        {
+          "kind": "file_read",
+          "payload": {
+            "path": "docs/runbooks/billing-retries.md",
+            "startLine": 1,
+            "endLine": 180
+          }
+        }
+      ],
+      "expected": {
+        "nextAction": "Document the one-time backfill and close the task",
+        "requiredConstraints": [
+          "Do not add a migration."
+        ],
+        "requiredArtifacts": [
+          "Applied billing retry label backfill."
+        ],
+        "candidateActions": [
+          {
+            "actionType": "file_read",
+            "path": "docs/runbooks/billing-retries.md",
+            "startLine": 1,
+            "endLine": 180
+          }
+        ],
+        "sideEffectActions": [
+          {
+            "actionType": "command_exec",
+            "command": "python scripts/backfill_retry_labels.py --apply",
+            "sideEffect": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "oauth_env_loading",
+      "description": "Recover an OAuth env-order bugfix while keeping prod secrets untouched.",
+      "minTailEvents": 2,
+      "events": [
+        {
+          "kind": "user_message",
+          "payload": {
+            "text": "Fix OAuth env loading order and do not rotate production secrets."
+          }
+        },
+        {
+          "kind": "decision",
+          "payload": {
+            "category": "constraint",
+            "text": "Do not rotate production secrets.",
+            "pinned": true
+          }
+        },
+        {
+          "kind": "file_read",
+          "payload": {
+            "path": "src/config/oauth-env.ts",
+            "startLine": 1,
+            "endLine": 180
+          }
+        },
+        {
+          "kind": "plan_update",
+          "payload": {
+            "items": [
+              {
+                "id": "patch",
+                "text": "Update env loading precedence",
+                "status": "in_progress"
+              },
+              {
+                "id": "verify",
+                "text": "Run OAuth config tests",
+                "status": "pending"
+              }
+            ],
+            "nextAction": "Update env loading precedence"
+          }
+        },
+        {
+          "kind": "file_write",
+          "payload": {
+            "path": "src/config/oauth-env.ts",
+            "summary": "Applied explicit OAuth env precedence before fallback values.",
+            "afterHash": "hash-oauth-1"
+          }
+        },
+        {
+          "kind": "command_exec",
+          "payload": {
+            "command": "vitest tests/config/oauth-env.test.ts",
+            "dependsOnPaths": [
+              "src/config/oauth-env.ts",
+              "tests/config/oauth-env.test.ts"
+            ],
+            "exitCode": 0,
+            "summary": "OAuth config tests passed"
+          }
+        }
+      ],
+      "expected": {
+        "nextAction": "Update env loading precedence",
+        "requiredConstraints": [
+          "Do not rotate production secrets."
+        ],
+        "requiredArtifacts": [
+          "Applied explicit OAuth env precedence before fallback values."
+        ],
+        "candidateActions": [
+          {
+            "actionType": "file_read",
+            "path": "src/config/oauth-env.ts",
+            "startLine": 1,
+            "endLine": 180
+          },
+          {
+            "actionType": "command_exec",
+            "command": "vitest tests/config/oauth-env.test.ts",
+            "dependsOnPaths": [
+              "src/config/oauth-env.ts",
+              "tests/config/oauth-env.test.ts"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

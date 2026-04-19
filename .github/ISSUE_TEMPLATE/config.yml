@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue
+    url: https://github.com/wang33550/1/security
+    about: Do not post security issues publicly. Follow SECURITY.md.

@@ -1,0 +1,112 @@
+{
+  "version": "trr_trace_v1",
+  "description": "Imported auth recovery trace",
+  "source": {
+    "host": "codex",
+    "traceId": "auth_imported_trace",
+    "exportedAt": "2026-04-19T12:00:00.000Z",
+    "exporter": "manual-example",
+    "notes": "Normalized host trace that can be replayed through the runtime benchmark."
+  },
+  "session": {
+    "provider": "custom",
+    "model": "example-model",
+    "workspaceRoot": "/workspace/demo"
+  },
+  "minTailEvents": 2,
+  "checkpoint": {
+    "create": true,
+    "force": true
+  },
+  "events": [
+    {
+      "kind": "user_message",
+      "payload": {
+        "text": "Fix the flaky auth test without changing the database schema.",
+        "successCriteria": [
+          "Auth tests pass",
+          "No schema changes"
+        ]
+      }
+    },
+    {
+      "kind": "decision",
+      "payload": {
+        "category": "constraint",
+        "text": "Do not modify database schema.",
+        "pinned": true
+      }
+    },
+    {
+      "kind": "file_read",
+      "payload": {
+        "path": "src/auth/tokens.ts",
+        "startLine": 1,
+        "endLine": 80
+      }
+    },
+    {
+      "kind": "plan_update",
+      "payload": {
+        "items": [
+          {
+            "id": "inspect",
+            "text": "Inspect flaky auth test",
+            "status": "done"
+          },
+          {
+            "id": "patch",
+            "text": "Patch token refresh logic",
+            "status": "in_progress"
+          },
+          {
+            "id": "verify",
+            "text": "Run auth test suite",
+            "status": "pending"
+          }
+        ],
+        "nextAction": "Patch token refresh logic"
+      }
+    },
+    {
+      "kind": "file_write",
+      "payload": {
+        "path": "src/auth/tokens.ts",
+        "summary": "Adjusted token refresh timing to avoid race conditions.",
+        "afterHash": "hash-1"
+      }
+    },
+    {
+      "kind": "command_exec",
+      "payload": {
+        "command": "git push origin fix/auth-refresh",
+        "sideEffect": true,
+        "summary": "Pushed auth refresh fix"
+      }
+    }
+  ],
+  "expected": {
+    "nextAction": "Patch token refresh logic",
+    "requiredConstraints": [
+      "Do not modify database schema."
+    ],
+    "requiredArtifacts": [
+      "Adjusted token refresh timing to avoid race conditions."
+    ],
+    "candidateActions": [
+      {
+        "actionType": "file_read",
+        "path": "src/auth/tokens.ts",
+        "startLine": 1,
+        "endLine": 80
+      }
+    ],
+    "sideEffectActions": [
+      {
+        "actionType": "command_exec",
+        "command": "git push origin fix/auth-refresh",
+        "sideEffect": true
+      }
+    ]
+  }
+}

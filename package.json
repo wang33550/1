@@ -1,0 +1,63 @@
+{
+  "name": "task-recovery-runtime",
+  "version": "0.1.0",
+  "description": "Cross-model task state recovery runtime for coding agents",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wang33550/1.git"
+  },
+  "homepage": "https://github.com/wang33550/1",
+  "bugs": {
+    "url": "https://github.com/wang33550/1/issues"
+  },
+  "bin": {
+    "trr": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "benchmarks",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "benchmark": "tsx src/cli.ts eval run --dataset benchmarks/recovery-benchmark.json --format markdown",
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist coverage .tmp",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "agent",
+    "context",
+    "memory",
+    "checkpoint",
+    "resume",
+    "codex",
+    "claude",
+    "openai",
+    "anthropic"
+  ],
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.56.0",
+    "commander": "^13.1.0",
+    "openai": "^5.12.2",
+    "pino": "^9.7.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
