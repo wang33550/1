@@ -10,6 +10,8 @@
 - Added runtime coverage for stale checkpoint `next_action` fallback through frontier promotion
 - Added corpus-level evaluation for directories of harvested normalized traces
 - Added real local trace report showing `runtime` keeps `100%` next-action recovery on the curated harvested corpus while naive summary drops to `66.7%` overall and `33.3%` on the Codex-only slice
+- Added GitHub CI workflow, issue templates, pull request template, and trace contribution guide
+- Added release-check and prepublish protection scripts
 
 ## 0.1.0
 

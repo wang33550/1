@@ -5,7 +5,7 @@
 
 Task Recovery Runtime (`trr`) is a cross-model state layer for coding agents. It turns long conversations and tool activity into structured checkpoints so an agent can continue from the current task frontier instead of redoing work after context compaction.
 
-Status: `0.1.x developer preview`
+Status: `0.1.1 developer preview`
 
 ## Goals
 
@@ -180,6 +180,7 @@ Further design details live in:
 - [Evaluation](docs/EVALUATION.md)
 - [Benchmark Results](docs/BENCHMARK_RESULTS.md)
 - [Real Trace Results](docs/REAL_TRACE_RESULTS.md)
+- [Releasing](docs/RELEASING.md)
 - [Checkpoint Schema](docs/CHECKPOINT_SCHEMA.md)
 - [Provider Integration](docs/PROVIDER_INTEGRATION.md)
 - [Trace Import](docs/TRACE_IMPORT.md)
@@ -212,7 +213,7 @@ See [Real Trace Results](docs/REAL_TRACE_RESULTS.md) for the exact commands, cor
 
 ## Status
 
-`0.1.0` is an MVP intended to prove the runtime contract:
+`0.1.1` is an MVP intended to prove the runtime contract:
 
 - structure task state
 - resume from next action

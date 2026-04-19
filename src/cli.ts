@@ -40,7 +40,7 @@ function parseCsvList(value?: string): string[] | undefined {
 }
 
 const program = new Command();
-program.name("trr").description("Task Recovery Runtime CLI").version("0.1.0");
+program.name("trr").description("Task Recovery Runtime CLI").version("0.1.1");
 
 program.option("--db <path>", "local store file path", ".tmp/trr-store.json");
 
