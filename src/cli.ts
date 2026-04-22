@@ -2,15 +2,31 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { Command } from "commander";
 
 import { AnthropicAdapter } from "./adapters/anthropic";
 import { OpenAIAdapter } from "./adapters/openai";
+import {
+  codexHookInstallState,
+  codexHomeDir,
+  handleCodexHook,
+  installCodexHooks
+} from "./codex-hooks";
+import {
+  loadConfig,
+  resolveStorePath,
+  resolveWorkspaceRoot,
+  writeDefaultConfig,
+  type TrrConfig
+} from "./config";
 import { loadTraceCorpus } from "./evals/corpus";
 import { loadEvalDataset } from "./evals/dataset";
 import { renderEvalMarkdown, renderTraceCorpusEvalMarkdown } from "./evals/report";
 import { runEval } from "./evals/runner";
+import { handleClaudeHook, installClaudeHooks } from "./claude-hooks";
+import { adapterForHost } from "./host-adapters";
 import {
   harvestLocalTraces,
   normalizeClaudeSession,
@@ -18,8 +34,23 @@ import {
 } from "./host-importers";
 import { renderLiveReplayMarkdown, runLiveReplay } from "./live-eval";
 import { TaskRecoveryRuntime } from "./runtime";
+import { resolveFeedbackSession, writeFeedbackBundle } from "./feedback";
+import {
+  defaultRcFilePath,
+  detectShellName,
+  ensureShellIntegrationScript,
+  installShellIntegration,
+  isShellIntegrationInstalled,
+  renderShellActivation,
+  resolveShellLauncher
+} from "./shell-integration";
+import { ensureShimDirectory, findRealExecutable } from "./shim-common";
 import { importTrace, loadTraceFile, traceToEvalDataset } from "./traces";
+import { sha256 } from "./utils";
+import { captureWorkspaceSnapshot } from "./workspace";
 import type { JsonObject, ProposedAction } from "./types";
+
+const TRR_VERSION = "0.1.2";
 
 function parseJsonFile(path: string): JsonObject {
   return JSON.parse(fs.readFileSync(path, "utf8")) as JsonObject;
@@ -39,24 +70,63 @@ function parseCsvList(value?: string): string[] | undefined {
   return items.length > 0 ? items : undefined;
 }
 
-const program = new Command();
-program.name("trr").description("Task Recovery Runtime CLI").version("0.1.1");
+function maybeRespawnForPty(workspaceRoot: string): void {
+  if (process.env.TRR_PTY_RESPAWN === "1") {
+    return;
+  }
 
-program.option("--db <path>", "local store file path", ".tmp/trr-store.json");
+  const launcher = resolveShellLauncher(workspaceRoot);
+  if (!launcher.ptyReady) {
+    throw new Error(
+      `unable to find a Node runtime with node-pty support for workspace ${workspaceRoot}; run trr doctor`
+    );
+  }
+
+  const sameExecutable = path.resolve(launcher.nodeExecutable) === path.resolve(process.execPath);
+  const sameEntry = path.resolve(launcher.cliEntry) === path.resolve(process.argv[1] || launcher.cliEntry);
+  if (sameExecutable && sameEntry) {
+    return;
+  }
+
+  const result = spawnSync(launcher.nodeExecutable, [launcher.cliEntry, ...process.argv.slice(2)], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      TRR_PTY_RESPAWN: "1"
+    }
+  });
+  process.exitCode = result.status ?? 1;
+  process.exit();
+}
+
+const program = new Command();
+program.name("trr").description("任务恢复运行时 CLI").version(TRR_VERSION);
+
+const DEFAULT_DB_PATH = ".tmp/trr-store.json";
+
+program.option("--db <path>", "local store file path", DEFAULT_DB_PATH);
+
+function effectiveDbPath(workspaceRoot = resolveWorkspaceRoot()): string {
+  const explicit = program.opts().db as string;
+  if (explicit && explicit !== DEFAULT_DB_PATH) return explicit;
+  return resolveStorePath(loadConfig(workspaceRoot));
+}
 
 program
   .command("session")
-  .description("session commands")
+  .description("会话相关命令")
   .addCommand(
     new Command("create")
       .requiredOption("--provider <provider>", "openai | anthropic | custom")
       .requiredOption("--model <model>", "model id")
+      .option("--host <host>", "host id")
       .option("--workspace <path>", "workspace root")
       .action((options) => {
-        const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+        const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath(options.workspace) });
         const session = runtime.createSession({
           provider: options.provider,
           model: options.model,
+          host: options.host,
           workspaceRoot: options.workspace
         });
         runtime.close();
@@ -65,7 +135,7 @@ program
   )
   .addCommand(
     new Command("list").action(() => {
-      const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+      const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
       console.log(JSON.stringify(runtime.listSessions(), null, 2));
       runtime.close();
     })
@@ -73,7 +143,7 @@ program
 
 program
   .command("event")
-  .description("event commands")
+  .description("事件相关命令")
   .addCommand(
     new Command("add")
       .requiredOption("--session <session>", "session id")
@@ -84,7 +154,7 @@ program
       .option("--span-id <span>", "span id")
       .option("--parent-span-id <span>", "parent span id")
       .action((options) => {
-        const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+        const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
         const filePayload = options.payloadFile ? parseJsonFile(options.payloadFile) : undefined;
         const inlinePayload = parseInlineJson(options.payloadJson);
         const payload = {
@@ -109,7 +179,7 @@ program
       .option("--from <seq>", "from seq")
       .option("--to <seq>", "to seq")
       .action((options) => {
-        const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+        const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
         const events = runtime.listEvents(options.session, {
           fromSeq: options.from ? Number(options.from) : undefined,
           toSeq: options.to ? Number(options.to) : undefined
@@ -121,13 +191,13 @@ program
 
 program
   .command("checkpoint")
-  .description("checkpoint commands")
+  .description("checkpoint 相关命令")
   .addCommand(
     new Command("create")
       .requiredOption("--session <session>", "session id")
       .option("--force", "force checkpoint even if pending activity", false)
       .action((options) => {
-        const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+        const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
         const checkpoint = runtime.createCheckpoint(options.session, options.force);
         runtime.close();
         console.log(JSON.stringify(checkpoint, null, 2));
@@ -137,22 +207,59 @@ program
     new Command("show")
       .requiredOption("--session <session>", "session id")
       .action((options) => {
-        const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+        const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
         const checkpoint = runtime.getLatestCheckpoint(options.session);
         runtime.close();
         console.log(JSON.stringify(checkpoint, null, 2));
       })
   );
 
-program
+const resumeCommand = program
   .command("resume")
-  .description("resume packet commands")
+  .description("恢复包相关命令")
+  .argument("[session]", "session id for manual resume injection/printing")
+  .option("--host <host>", "resume envelope host", "generic-pty")
+  .action((sessionId, options) => {
+    if (!sessionId) {
+      if (process.argv.includes("build")) return;
+      throw new Error("session id is required or use `trr resume build`");
+    }
+    const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
+    runtime.createCheckpoint(sessionId, true);
+    const packet = runtime.buildResumePacket(sessionId);
+    const config = loadConfig();
+    const adapter = adapterForHost(
+      options.host,
+      config.hostProfiles[options.host as keyof TrrConfig["hostProfiles"]]
+    );
+    const envelope = adapter.buildResumeEnvelope(packet.packet);
+    const packetHash = sha256(envelope);
+    runtime.recordEvent({
+      sessionId,
+      kind: "resume_started",
+      payload: { reason: "manual_resume", host: options.host }
+    });
+    runtime.recordEvent({
+      sessionId,
+      kind: "resume_injected",
+      payload: { reason: "manual_resume", host: options.host, packetHash }
+    });
+    runtime.recordEvent({
+      sessionId,
+      kind: "resume_finished",
+      payload: { reason: "manual_resume", host: options.host }
+    });
+    runtime.close();
+    console.log(envelope);
+  });
+
+resumeCommand
   .addCommand(
     new Command("build")
       .requiredOption("--session <session>", "session id")
       .option("--exclude-latest-user", "exclude the latest user message", false)
       .action((options) => {
-        const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+        const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
         const packet = runtime.buildResumePacket(options.session, {
           excludeLatestUser: options.excludeLatestUser
         });
@@ -162,8 +269,60 @@ program
   );
 
 program
+  .command("export-feedback")
+  .description("导出当前或指定会话的脱敏反馈包")
+  .argument("[session]", "session id；省略时导出当前工作区最新会话")
+  .option("--last", "显式导出当前工作区最新会话", false)
+  .option("--host <host>", "按 host 过滤最新会话，例如 codex 或 claude")
+  .option("--out <path>", "输出文件路径，默认写入 .trr/feedback/")
+  .option("--event-limit <n>", "时间线最多保留多少条事件", "80")
+  .option("--artifact-limit <n>", "最多保留多少条最近 artifact", "20")
+  .option("--checkpoint-limit <n>", "最多保留多少个 checkpoint 预览", "5")
+  .option("--label <label>", "人工结果标签，例如 success | failure | unknown", "unknown")
+  .option("--notes <text>", "附加备注")
+  .option("--stdout", "同时将反馈包打印到标准输出", false)
+  .option("--no-redact", "禁用路径与常见密钥脱敏")
+  .action((sessionId, options) => {
+    const workspaceRoot = resolveWorkspaceRoot();
+    const config = loadConfig(workspaceRoot);
+    const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath(workspaceRoot) });
+    try {
+      const session = resolveFeedbackSession(runtime, workspaceRoot, sessionId, options.host);
+      const result = writeFeedbackBundle(runtime, config, session, {
+        outPath: options.out,
+        redact: options.redact,
+        eventLimit: Number(options.eventLimit),
+        artifactLimit: Number(options.artifactLimit),
+        checkpointLimit: Number(options.checkpointLimit),
+        label: options.label,
+        notes: options.notes,
+        trrVersion: TRR_VERSION
+      });
+      if (options.stdout) {
+        console.log(JSON.stringify(result.bundle, null, 2));
+        return;
+      }
+      console.log(
+        JSON.stringify(
+          {
+            outputPath: result.outputPath,
+            sessionId: result.bundle.session.id,
+            host: result.bundle.session.host,
+            redacted: result.bundle.redacted,
+            summary: result.bundle.summary
+          },
+          null,
+          2
+        )
+      );
+    } finally {
+      runtime.close();
+    }
+  });
+
+program
   .command("trace")
-  .description("normalized trace import and replay")
+  .description("标准化 trace 的导入、采集与回放")
   .addCommand(
     new Command("normalize-codex")
       .requiredOption("--file <path>", "Codex archived session JSONL")
@@ -228,7 +387,7 @@ program
       .option("--create-checkpoint", "create checkpoint after import")
       .option("--force-checkpoint", "force checkpoint creation", false)
       .action((options) => {
-        const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+        const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
         const trace = loadTraceFile(options.file);
         const result = importTrace(runtime, trace, {
           sessionId: options.sessionId,
@@ -309,14 +468,14 @@ program
 
 program
   .command("guard")
-  .description("repeat guard commands")
+  .description("重复执行保护相关命令")
   .addCommand(
     new Command("check")
       .requiredOption("--session <session>", "session id")
       .option("--action-file <path>", "action JSON file")
       .option("--action-json <json>", "inline action JSON")
       .action((options) => {
-        const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+        const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
         const fromFile = options.actionFile ? parseJsonFile(options.actionFile) : undefined;
         const inline = parseInlineJson(options.actionJson);
         const action = { ...(fromFile ?? {}), ...(inline ?? {}) } as unknown as ProposedAction;
@@ -332,7 +491,7 @@ program
 
 program
   .command("eval")
-  .description("run recovery benchmark evaluation")
+  .description("运行恢复效果评测")
   .addCommand(
     new Command("run")
       .option(
@@ -406,7 +565,7 @@ program
 
 program
   .command("turn")
-  .description("send a text turn through the provider adapter")
+  .description("通过 provider adapter 发送一轮文本")
   .addCommand(
     new Command("send")
       .requiredOption("--session <session>", "session id")
@@ -415,7 +574,7 @@ program
       .option("--max-output-tokens <n>", "max output tokens")
       .option("--temperature <n>", "temperature")
       .action(async (options) => {
-        const runtime = new TaskRecoveryRuntime({ dbPath: program.opts().db });
+        const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath() });
         const session = runtime.getSession(options.session);
         runtime.recordEvent({
           sessionId: session.id,
@@ -460,6 +619,223 @@ program
         );
       })
   );
+
+program
+  .command("config")
+  .description("配置相关命令")
+  .addCommand(
+    new Command("init").action(() => {
+      const workspaceRoot = resolveWorkspaceRoot();
+      const configPath = writeDefaultConfig(workspaceRoot);
+      console.log(configPath);
+    })
+  );
+
+program
+  .command("env")
+  .description("输出当前终端的激活脚本，使 codex/claude 自动经过 trr")
+  .option("--shell <shell>", "bash | zsh | fish | powershell")
+  .action((options) => {
+    const shell = detectShellName(options.shell);
+    const launcher = resolveShellLauncher(resolveWorkspaceRoot());
+    process.stdout.write(renderShellActivation(shell, launcher));
+  });
+
+program
+  .command("install-shell")
+  .description("安装持久 shell 集成，使 codex/claude 自动经过 trr")
+  .option("--shell <shell>", "bash | zsh | fish | powershell")
+  .option("--rc-file <path>", "override rc/profile path")
+  .action((options) => {
+    const workspaceRoot = resolveWorkspaceRoot();
+    const shell = detectShellName(options.shell);
+    const launcher = resolveShellLauncher(workspaceRoot);
+    const result = installShellIntegration(workspaceRoot, shell, options.rcFile, launcher);
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program
+  .command("install-claude-hooks")
+  .description("在当前工作区安装官方 Claude Code hooks")
+  .action(() => {
+    const workspaceRoot = resolveWorkspaceRoot();
+    const result = installClaudeHooks(workspaceRoot);
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program
+  .command("install-codex-hooks")
+  .description("在 CODEX_HOME 安装官方 Codex hooks，使普通 codex 会话调用 trr")
+  .option("--codex-home <path>", "override CODEX_HOME")
+  .action((options) => {
+    const result = installCodexHooks(codexHomeDir(options.codexHome));
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program
+  .command("setup")
+  .description("一键完成本地初始化：配置、shell 集成、Codex hooks、Claude hooks")
+  .option("--shell <shell>", "bash | zsh | fish | powershell")
+  .option("--rc-file <path>", "override rc/profile path for shell integration")
+  .option("--codex-home <path>", "override CODEX_HOME")
+  .option("--skip-shell", "do not install shell integration", false)
+  .option("--skip-codex-hooks", "do not install Codex hooks", false)
+  .option("--skip-claude-hooks", "do not install Claude hooks", false)
+  .action((options) => {
+    const workspaceRoot = resolveWorkspaceRoot();
+    const configPath = writeDefaultConfig(workspaceRoot);
+    const config = loadConfig(workspaceRoot);
+    const shimDir = ensureShimDirectory(config.workspaceRoot, config.guardPolicy);
+    const shell = detectShellName(options.shell);
+    const launcher = resolveShellLauncher(workspaceRoot);
+    const shellIntegration = options.skipShell
+      ? undefined
+      : installShellIntegration(workspaceRoot, shell, options.rcFile, launcher);
+    const codexHooks = options.skipCodexHooks
+      ? undefined
+      : installCodexHooks(codexHomeDir(options.codexHome));
+    const claudeHooks = options.skipClaudeHooks ? undefined : installClaudeHooks(workspaceRoot);
+
+    console.log(
+      JSON.stringify(
+        {
+          workspaceRoot,
+          configPath,
+          shimDir,
+          shellIntegration,
+          codexHooks,
+          claudeHooks,
+          next: "Open a new terminal, then run codex or claude normally."
+        },
+        null,
+        2
+      )
+    );
+  });
+
+program
+  .command("smoke")
+  .description("运行内置本地 smoke，验证恢复、guard 与重启链路")
+  .option("--format <format>", "json | markdown", "json")
+  .action(async (options) => {
+    const { renderSmokeMarkdown, runLocalSmoke } = await import("./smoke");
+    const report = await runLocalSmoke();
+    const output =
+      options.format === "markdown"
+        ? renderSmokeMarkdown(report)
+        : JSON.stringify(report, null, 2);
+    console.log(output);
+  });
+
+program
+  .command("hook")
+  .description("宿主内部 hook 处理命令")
+  .addCommand(
+    new Command("claude").action(() => {
+      const raw = fs.readFileSync(0, "utf8");
+      const payload = (raw.trim() ? JSON.parse(raw) : {}) as JsonObject;
+      const response = handleClaudeHook(payload);
+      if (response) {
+        console.log(JSON.stringify(response));
+      }
+    })
+  )
+  .addCommand(
+    new Command("codex").action(() => {
+      const raw = fs.readFileSync(0, "utf8");
+      const payload = (raw.trim() ? JSON.parse(raw) : {}) as JsonObject;
+      const response = handleCodexHook(payload);
+      if (response) {
+        console.log(JSON.stringify(response));
+      }
+    })
+  );
+
+program.command("sessions").description("列出最近的包装会话").action(() => {
+  const workspaceRoot = resolveWorkspaceRoot();
+  const runtime = new TaskRecoveryRuntime({ dbPath: effectiveDbPath(workspaceRoot) });
+  const rows = runtime.listSessions().map((session) => {
+    const checkpoint = runtime.getLatestCheckpoint(session.id);
+    const lastEvent = runtime.listEvents(session.id).slice(-1)[0];
+    return {
+      id: session.id,
+      host: session.host || "unknown",
+      workspaceRoot: session.workspaceRoot,
+      model: session.model,
+      createdAt: session.createdAt,
+      nextAction: checkpoint?.nextAction,
+      phase: checkpoint?.phase,
+      lastEventKind: lastEvent?.kind,
+      lastEventAt: lastEvent?.ts
+    };
+  });
+  runtime.close();
+  console.log(JSON.stringify(rows, null, 2));
+});
+
+program.command("doctor").description("检查宿主、shim、配置和 store 的就绪状态").action(() => {
+  const workspaceRoot = resolveWorkspaceRoot();
+  const config = loadConfig(workspaceRoot);
+  const storePath = effectiveDbPath(workspaceRoot);
+  const shimDir = ensureShimDirectory(config.workspaceRoot, config.guardPolicy);
+  const workspaceSnapshot = captureWorkspaceSnapshot(config.workspaceRoot);
+  const detectedShell = detectShellName();
+  const launcher = resolveShellLauncher(workspaceRoot);
+  const shellScriptPath = ensureShellIntegrationScript(config.workspaceRoot, detectedShell, launcher);
+  const shellRcFile = defaultRcFilePath(detectedShell);
+  const shellRcContent = fs.existsSync(shellRcFile) ? fs.readFileSync(shellRcFile, "utf8") : "";
+  const codexHooks = codexHookInstallState();
+  const checks = {
+    workspaceRoot: config.workspaceRoot,
+    configPath: path.join(config.workspaceRoot, "trr.config.json"),
+    storePath,
+    shimDir,
+    hostCommands: {
+      codex: Boolean(findRealExecutable(config.hostProfiles.codex.command, process.env.PATH || "")),
+      claude: Boolean(findRealExecutable(config.hostProfiles.claude.command, process.env.PATH || ""))
+    },
+    hostDetection: {
+      codex: config.hostProfiles.codex.detection,
+      claude: config.hostProfiles.claude.detection,
+      "generic-pty": config.hostProfiles["generic-pty"].detection
+    },
+    shimReady: fs.existsSync(shimDir),
+    shellIntegration: {
+      detectedShell,
+      launcher,
+      scriptPath: shellScriptPath,
+      rcFilePath: shellRcFile,
+      installedInRc: isShellIntegrationInstalled(detectedShell, shellRcContent, shellScriptPath)
+    },
+    codexHooks,
+    workspaceSnapshot
+  };
+  console.log(JSON.stringify(checks, null, 2));
+});
+
+program
+  .command("wrap")
+  .description("启动带恢复与 guard 能力的包装宿主")
+  .option("--workspace-root <path>", "override workspace root for this wrapped host launch")
+  .argument("<host>", "codex | claude | generic-pty")
+  .argument("[cmd...]", "optional host args, or generic-pty command after --")
+  .action(async function (this: Command, host: string, cmd: string[] | undefined) {
+    const options = this.opts<{ workspaceRoot?: string }>();
+    const workspaceRoot = resolveWorkspaceRoot(options.workspaceRoot || process.cwd());
+    maybeRespawnForPty(workspaceRoot);
+    const { wrapHost } = await import("./wrap");
+    const config = loadConfig(workspaceRoot);
+    const result = await wrapHost({
+      host,
+      workspaceRoot,
+      config,
+      dbPath: effectiveDbPath(workspaceRoot),
+      passthroughArgs: cmd ?? []
+    });
+    if (!process.stdout.isTTY) {
+      console.log(JSON.stringify(result, null, 2));
+    }
+  });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));

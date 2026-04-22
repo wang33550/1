@@ -9,7 +9,9 @@ function isPlanLikeItem(value: unknown): value is { status?: unknown; text?: unk
 }
 
 function isSemanticFrontierEvent(event: EventRecord): boolean {
-  return !["checkpoint_created", "resume_started", "resume_finished"].includes(event.kind);
+  return !["checkpoint_created", "resume_started", "resume_injected", "resume_finished"].includes(
+    event.kind
+  );
 }
 
 function normalizeText(value: string): string {
@@ -55,15 +57,10 @@ function resolveCheckpointForResume(
 
   const currentNextAction = normalizeText(effective.nextAction);
   const hintedNextAction = normalizeText(hints.nextAction);
-  const planStillMatches = effective.currentPlan.some((item) => {
-    const itemText = normalizeText(item.text);
-    return itemText === currentNextAction && item.status !== "done";
-  });
-
   if (
     !currentNextAction ||
     currentNextAction === normalizeText(FALLBACK_NEXT_ACTION) ||
-    (!planStillMatches && currentNextAction !== hintedNextAction)
+    currentNextAction !== hintedNextAction
   ) {
     effective.nextAction = hints.nextAction;
   }
@@ -188,6 +185,40 @@ function renderCheckpointSummary(checkpoint?: CheckpointState): string {
   if (checkpoint.unresolvedQuestions.length > 0) {
     lines.push(`unresolved_questions:`);
     lines.push(renderList(checkpoint.unresolvedQuestions, "(none)", 4));
+  }
+  if (checkpoint.openRisks.length > 0) {
+    lines.push(`open_risks:`);
+    lines.push(renderList(checkpoint.openRisks, "(none)", 4));
+  }
+  if (checkpoint.blockedActions.length > 0) {
+    lines.push(`blocked_actions:`);
+    lines.push(renderList(checkpoint.blockedActions, "(none)", 4));
+  }
+  if (checkpoint.recentSideEffects.length > 0) {
+    lines.push(`recent_side_effects:`);
+    lines.push(renderList(checkpoint.recentSideEffects, "(none)", 4));
+  }
+  if (checkpoint.lastKnownWorkspaceState) {
+    lines.push(`workspace_state:`);
+    lines.push(`- root: ${checkpoint.lastKnownWorkspaceState.workspaceRoot}`);
+    if (checkpoint.lastKnownWorkspaceState.modifiedFiles.length > 0) {
+      lines.push(
+        renderList(
+          checkpoint.lastKnownWorkspaceState.modifiedFiles.map((item) => `modified ${item}`),
+          "(none)",
+          4
+        )
+      );
+    }
+    if (checkpoint.lastKnownWorkspaceState.recentTestResults.length > 0) {
+      lines.push(
+        renderList(
+          checkpoint.lastKnownWorkspaceState.recentTestResults.map((item) => `test ${item}`),
+          "(none)",
+          3
+        )
+      );
+    }
   }
 
   return lines.join("\n");

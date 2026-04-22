@@ -13,6 +13,12 @@ export const EventKindSchema = z.enum([
   "checkpoint_created",
   "resume_started",
   "resume_finished",
+  "host_event",
+  "compaction_detected",
+  "resume_injected",
+  "guard_decision",
+  "workspace_snapshot",
+  "process_restarted",
   "error"
 ]);
 
@@ -52,6 +58,15 @@ export const WorkItemSchema = z.object({
   evidenceEventIds: z.array(z.string())
 });
 
+export const WorkspaceSnapshotSchema = z.object({
+  workspaceRoot: z.string(),
+  capturedAt: z.string(),
+  gitStatusShort: z.array(z.string()),
+  gitDiffStat: z.array(z.string()),
+  modifiedFiles: z.array(z.string()),
+  recentTestResults: z.array(z.string())
+});
+
 export const ArtifactRefSchema = z.object({
   id: z.string(),
   sessionId: z.string(),
@@ -67,6 +82,7 @@ export const ArtifactRefSchema = z.object({
 export const CheckpointStateSchema = z.object({
   checkpointId: z.string(),
   sessionId: z.string(),
+  host: z.string().optional(),
   createdAt: z.string(),
   eventRange: z.object({
     fromSeq: z.number().int(),
@@ -87,5 +103,10 @@ export const CheckpointStateSchema = z.object({
   artifacts: z.array(ArtifactRefSchema),
   doNotRepeat: z.array(z.string()),
   unresolvedQuestions: z.array(z.string()),
+  lastResumePacketHash: z.string().optional(),
+  lastKnownWorkspaceState: WorkspaceSnapshotSchema.optional(),
+  openRisks: z.array(z.string()),
+  blockedActions: z.array(z.string()),
+  recentSideEffects: z.array(z.string()),
   frontierAnchorSeq: z.number().int()
 });

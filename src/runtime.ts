@@ -6,7 +6,8 @@ import type {
   EventRecord,
   ProposedAction,
   ResumePacket,
-  SessionRecord
+  SessionRecord,
+  WorkspaceSnapshot
 } from "./types";
 import { RuntimeDatabase } from "./db";
 import { DeterministicCheckpointCompiler } from "./checkpoint-compiler";
@@ -81,6 +82,46 @@ function maybeArtifact(event: EventRecord): Omit<ArtifactRef, "id"> | undefined 
       type: "plan",
       title: "Plan snapshot",
       summary: normalizeWhitespace(safeText(event.payload.nextAction || "Plan updated")),
+      sourceEventId: event.id,
+      metadata: event.payload
+    };
+  }
+
+  if (event.kind === "workspace_snapshot") {
+    const workspaceRoot = normalizeWhitespace(safeText(event.payload.workspaceRoot));
+    return {
+      sessionId: event.sessionId,
+      type: "summary",
+      title: `Workspace snapshot: ${workspaceRoot || "workspace"}`,
+      summary: normalizeWhitespace(
+        safeText(
+          event.payload.summary ||
+            [
+              workspaceRoot ? `root=${workspaceRoot}` : "",
+              Array.isArray(event.payload.modifiedFiles)
+                ? `modified=${event.payload.modifiedFiles.length}`
+                : "",
+              Array.isArray(event.payload.recentTestResults)
+                ? `tests=${event.payload.recentTestResults.length}`
+                : ""
+            ]
+              .filter(Boolean)
+              .join(" ")
+        )
+      ),
+      sourceEventId: event.id,
+      metadata: event.payload
+    };
+  }
+
+  if (event.kind === "guard_decision") {
+    return {
+      sessionId: event.sessionId,
+      type: "summary",
+      title: `Guard decision: ${safeText(event.payload.decision)}`,
+      summary: normalizeWhitespace(
+        safeText(event.payload.reason || event.payload.command || "Guard decision recorded")
+      ),
       sourceEventId: event.id,
       metadata: event.payload
     };
@@ -170,6 +211,15 @@ export class TaskRecoveryRuntime {
     return this.db.listSessions();
   }
 
+  findLatestSession(criteria: { host?: string; workspaceRoot?: string }): SessionRecord | undefined {
+    const workspaceRoot = normalizeWhitespace(criteria.workspaceRoot || "");
+    return this.db.listSessions().find(
+      (session) =>
+        (!criteria.host || session.host === criteria.host) &&
+        (!workspaceRoot || normalizeWhitespace(session.workspaceRoot || "") === workspaceRoot)
+    );
+  }
+
   recordEvent(input: AppendEventInput): EventRecord {
     const event = this.db.appendEvent({
       ...input,
@@ -196,6 +246,63 @@ export class TaskRecoveryRuntime {
     return this.db.listEvents(sessionId, options);
   }
 
+  latestResumePacketHash(sessionId: string): string | undefined {
+    const event = [...this.db.listEvents(sessionId)]
+      .reverse()
+      .find((row) => row.kind === "resume_injected");
+    const value = event ? normalizeWhitespace(safeText(event.payload.packetHash)) : "";
+    return value || undefined;
+  }
+
+  latestWorkspaceSnapshot(sessionId: string): WorkspaceSnapshot | undefined {
+    const event = [...this.db.listEvents(sessionId)]
+      .reverse()
+      .find((row) => row.kind === "workspace_snapshot");
+    if (!event) return undefined;
+    const workspaceRoot = normalizeWhitespace(safeText(event.payload.workspaceRoot));
+    if (!workspaceRoot) return undefined;
+    return {
+      workspaceRoot,
+      capturedAt: safeText(event.payload.capturedAt || event.ts),
+      gitStatusShort: Array.isArray(event.payload.gitStatusShort)
+        ? event.payload.gitStatusShort
+            .map((item) => normalizeWhitespace(safeText(item)))
+            .filter(Boolean)
+        : [],
+      gitDiffStat: Array.isArray(event.payload.gitDiffStat)
+        ? event.payload.gitDiffStat
+            .map((item) => normalizeWhitespace(safeText(item)))
+            .filter(Boolean)
+        : [],
+      modifiedFiles: Array.isArray(event.payload.modifiedFiles)
+        ? event.payload.modifiedFiles
+            .map((item) => normalizeWhitespace(safeText(item)))
+            .filter(Boolean)
+        : [],
+      recentTestResults: Array.isArray(event.payload.recentTestResults)
+        ? event.payload.recentTestResults
+            .map((item) => normalizeWhitespace(safeText(item)))
+            .filter(Boolean)
+        : []
+    };
+  }
+
+  recordWorkspaceSnapshot(sessionId: string, snapshot: WorkspaceSnapshot): EventRecord {
+    return this.recordEvent({
+      sessionId,
+      kind: "workspace_snapshot",
+      payload: {
+        workspaceRoot: snapshot.workspaceRoot,
+        capturedAt: snapshot.capturedAt,
+        gitStatusShort: snapshot.gitStatusShort,
+        gitDiffStat: snapshot.gitDiffStat,
+        modifiedFiles: snapshot.modifiedFiles,
+        recentTestResults: snapshot.recentTestResults,
+        summary: `modified=${snapshot.modifiedFiles.length} tests=${snapshot.recentTestResults.length}`
+      }
+    });
+  }
+
   listCheckpoints(sessionId: string): CheckpointState[] {
     return this.db.listCheckpoints(sessionId);
   }
@@ -218,7 +325,7 @@ export class TaskRecoveryRuntime {
     const previous = this.db.getLatestCheckpoint(sessionId);
     const fromSeq = (previous?.eventRange.toSeq ?? 0) + 1;
     const lastSeq = events[events.length - 1]!.seq;
-    const compilationCutoff = Math.max(1, lastSeq - this.minTailEvents + 1);
+    const compilationCutoff = force ? lastSeq + 1 : Math.max(1, lastSeq - this.minTailEvents + 1);
     const compilableEvents = events.filter(
       (event) => event.seq >= fromSeq && event.seq < compilationCutoff
     );

@@ -5,11 +5,17 @@ import type { ModelAdapter, SendTurnInput, SendTurnResult } from "../types";
 export class AnthropicAdapter implements ModelAdapter {
   private readonly client: Anthropic;
 
-  constructor(apiKey = process.env.ANTHROPIC_API_KEY) {
+  constructor(
+    apiKey = process.env.ANTHROPIC_API_KEY,
+    baseURL = process.env.ANTHROPIC_BASE_URL || process.env.ANTHROPIC_API_BASE_URL
+  ) {
     if (!apiKey) {
       throw new Error("ANTHROPIC_API_KEY is required");
     }
-    this.client = new Anthropic({ apiKey });
+    this.client = new Anthropic({
+      apiKey,
+      ...(baseURL ? { baseURL } : {})
+    });
   }
 
   async sendTurn(input: SendTurnInput): Promise<SendTurnResult> {

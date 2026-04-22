@@ -11,6 +11,7 @@ export interface SessionRecord {
   id: string;
   provider: ProviderName;
   model: string;
+  host?: string;
   workspaceRoot?: string;
   createdAt: string;
 }
@@ -28,6 +29,12 @@ export type EventKind =
   | "checkpoint_created"
   | "resume_started"
   | "resume_finished"
+  | "host_event"
+  | "compaction_detected"
+  | "resume_injected"
+  | "guard_decision"
+  | "workspace_snapshot"
+  | "process_restarted"
   | "error";
 
 export interface EventRecord {
@@ -99,9 +106,19 @@ export interface WorkItem {
   evidenceEventIds: string[];
 }
 
+export interface WorkspaceSnapshot {
+  workspaceRoot: string;
+  capturedAt: string;
+  gitStatusShort: string[];
+  gitDiffStat: string[];
+  modifiedFiles: string[];
+  recentTestResults: string[];
+}
+
 export interface CheckpointState {
   checkpointId: string;
   sessionId: string;
+  host?: string;
   createdAt: string;
   eventRange: { fromSeq: number; toSeq: number };
   goal: string;
@@ -119,12 +136,18 @@ export interface CheckpointState {
   artifacts: ArtifactRef[];
   doNotRepeat: string[];
   unresolvedQuestions: string[];
+  lastResumePacketHash?: string;
+  lastKnownWorkspaceState?: WorkspaceSnapshot;
+  openRisks: string[];
+  blockedActions: string[];
+  recentSideEffects: string[];
   frontierAnchorSeq: number;
 }
 
 export interface CreateSessionInput {
   provider: ProviderName;
   model: string;
+  host?: string;
   workspaceRoot?: string;
   id?: string;
 }

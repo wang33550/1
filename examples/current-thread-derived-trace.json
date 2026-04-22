@@ -1,0 +1,131 @@
+{
+  "version": "trr_trace_v1",
+  "description": "Conversation-derived trace for the current trr productization thread",
+  "session": {
+    "provider": "custom",
+    "model": "codex",
+    "host": "codex",
+    "workspaceRoot": "/workspace/trr"
+  },
+  "minTailEvents": 2,
+  "events": [
+    {
+      "kind": "user_message",
+      "payload": {
+        "text": "Build a mature cross-model recovery tool so coding agents do not redo work after context compaction or restart."
+      }
+    },
+    {
+      "kind": "decision",
+      "payload": {
+        "category": "constraint",
+        "text": "Do not write user API keys or base URLs into repository-visible files.",
+        "pinned": true
+      }
+    },
+    {
+      "kind": "decision",
+      "payload": {
+        "category": "constraint",
+        "text": "Keep host integration general across users, shells, and environments.",
+        "pinned": true
+      }
+    },
+    {
+      "kind": "decision",
+      "payload": {
+        "category": "fact",
+        "text": "Claude should use official compaction hooks; Codex still needs wrapper and guard fallback because there is no documented public compaction hook."
+      }
+    },
+    {
+      "kind": "plan_update",
+      "payload": {
+        "items": [
+          {
+            "id": "research",
+            "text": "Verify official host behavior for Claude and Codex compaction handling",
+            "status": "done"
+          },
+          {
+            "id": "productize",
+            "text": "Implement shell wrapper, guard shims, Claude hooks, docs, and smoke coverage",
+            "status": "done"
+          },
+          {
+            "id": "validate",
+            "text": "Run real host validation for Codex and Claude using the current project thread as test material",
+            "status": "in_progress"
+          }
+        ],
+        "nextAction": "Run broader real-session validation for wrapped Codex and hooked Claude, then tighten remaining host-specific gaps."
+      }
+    },
+    {
+      "kind": "file_write",
+      "payload": {
+        "path": "docs/FINAL_READINESS.md",
+        "summary": "Rewrote final readiness around host-specific product paths and remaining external validation gaps.",
+        "afterHash": "current-thread-final-readiness"
+      }
+    },
+    {
+      "kind": "file_write",
+      "payload": {
+        "path": "docs/OFFICIAL_HOST_RESEARCH.md",
+        "summary": "Captured official Claude and Codex host behavior differences and integration consequences.",
+        "afterHash": "current-thread-official-host-research"
+      }
+    },
+    {
+      "kind": "file_write",
+      "payload": {
+        "path": "src/claude-hooks.ts",
+        "summary": "Added official Claude hook installation and runtime handling for session start, compaction, and Bash replay guard decisions.",
+        "afterHash": "current-thread-claude-hooks"
+      }
+    },
+    {
+      "kind": "command_exec",
+      "payload": {
+        "command": "npm test",
+        "summary": "27 tests passed",
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "command_exec",
+      "payload": {
+        "command": "npm run build",
+        "summary": "Build passed",
+        "exitCode": 0
+      }
+    },
+    {
+      "kind": "command_exec",
+      "payload": {
+        "command": "trr smoke --format markdown",
+        "summary": "Local smoke passed through fallback validation in this environment",
+        "exitCode": 0
+      }
+    }
+  ],
+  "expected": {
+    "nextAction": "Run broader real-session validation for wrapped Codex and hooked Claude, then tighten remaining host-specific gaps.",
+    "requiredConstraints": [
+      "Do not write user API keys or base URLs into repository-visible files.",
+      "Keep host integration general across users, shells, and environments."
+    ],
+    "requiredArtifacts": [
+      "Rewrote final readiness around host-specific product paths and remaining external validation gaps.",
+      "Captured official Claude and Codex host behavior differences and integration consequences."
+    ],
+    "sideEffectActions": [
+      {
+        "actionType": "command_exec",
+        "command": "git push origin main",
+        "sideEffect": true
+      }
+    ]
+  }
+}

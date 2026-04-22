@@ -2,7 +2,12 @@ node_modules/
 dist/
 coverage/
 .tmp/
+.trr/
+.claude/
+.codex
+.codex/
 .env
+trr.config.json
 *.db
 *.db-shm
 *.db-wal

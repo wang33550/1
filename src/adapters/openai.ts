@@ -5,11 +5,17 @@ import type { ModelAdapter, SendTurnInput, SendTurnResult } from "../types";
 export class OpenAIAdapter implements ModelAdapter {
   private readonly client: OpenAI;
 
-  constructor(apiKey = process.env.OPENAI_API_KEY) {
+  constructor(
+    apiKey = process.env.OPENAI_API_KEY,
+    baseURL = process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE_URL
+  ) {
     if (!apiKey) {
       throw new Error("OPENAI_API_KEY is required");
     }
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({
+      apiKey,
+      ...(baseURL ? { baseURL } : {})
+    });
   }
 
   async sendTurn(input: SendTurnInput): Promise<SendTurnResult> {

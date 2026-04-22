@@ -6,6 +6,7 @@ import type {
   EventRecord,
   MemoryItem,
   PlanItem,
+  WorkspaceSnapshot,
   WorkItem
 } from "./types";
 import { clone, generateId, normalizeWhitespace, nowIso, safeText, sha256, uniqueStrings } from "./utils";
@@ -31,6 +32,7 @@ function createEmptyCheckpoint(sessionId: string): CheckpointState {
   return {
     checkpointId: generateId("chk"),
     sessionId,
+    host: undefined,
     createdAt: nowIso(),
     eventRange: { fromSeq: 1, toSeq: 0 },
     goal: "",
@@ -48,6 +50,11 @@ function createEmptyCheckpoint(sessionId: string): CheckpointState {
     artifacts: [],
     doNotRepeat: [],
     unresolvedQuestions: [],
+    lastResumePacketHash: undefined,
+    lastKnownWorkspaceState: undefined,
+    openRisks: [],
+    blockedActions: [],
+    recentSideEffects: [],
     frontierAnchorSeq: 1
   };
 }
@@ -160,11 +167,18 @@ export class DeterministicCheckpointCompiler {
     const blockers: string[] = [...state.blockers];
     const doNotRepeat = [...state.doNotRepeat];
     const unresolvedQuestions = [...state.unresolvedQuestions];
+    const openRisks = [...state.openRisks];
+    const blockedActions = [...state.blockedActions];
+    const recentSideEffects = [...state.recentSideEffects];
 
     const planMap = new Map<string, PlanItem>(state.currentPlan.map((item) => [item.id, clone(item)]));
     let goal = state.goal;
     let nextAction = state.nextAction;
     const successCriteria = [...state.successCriteria];
+    let lastResumePacketHash = state.lastResumePacketHash;
+    let lastKnownWorkspaceState: WorkspaceSnapshot | undefined = state.lastKnownWorkspaceState;
+
+    state.host = input.session.host ?? state.host;
 
     for (const event of input.events) {
       if (event.kind === "user_message") {
@@ -246,7 +260,70 @@ export class DeterministicCheckpointCompiler {
         const sideEffect = event.payload.sideEffect === true;
         if (summary && sideEffect) {
           doNotRepeat.push(summary);
+          recentSideEffects.push(summary);
         }
+      }
+
+      if (event.kind === "workspace_snapshot") {
+        const workspaceRoot = normalizeWhitespace(safeText(event.payload.workspaceRoot));
+        if (workspaceRoot) {
+          lastKnownWorkspaceState = {
+            workspaceRoot,
+            capturedAt: safeText(event.payload.capturedAt || event.ts || nowIso()),
+            gitStatusShort: Array.isArray(event.payload.gitStatusShort)
+              ? event.payload.gitStatusShort
+                  .map((item) => normalizeWhitespace(safeText(item)))
+                  .filter(Boolean)
+              : [],
+            gitDiffStat: Array.isArray(event.payload.gitDiffStat)
+              ? event.payload.gitDiffStat
+                  .map((item) => normalizeWhitespace(safeText(item)))
+                  .filter(Boolean)
+              : [],
+            modifiedFiles: Array.isArray(event.payload.modifiedFiles)
+              ? event.payload.modifiedFiles
+                  .map((item) => normalizeWhitespace(safeText(item)))
+                  .filter(Boolean)
+              : [],
+            recentTestResults: Array.isArray(event.payload.recentTestResults)
+              ? event.payload.recentTestResults
+                  .map((item) => normalizeWhitespace(safeText(item)))
+                  .filter(Boolean)
+              : []
+          };
+        }
+      }
+
+      if (event.kind === "resume_injected") {
+        const packetHash = normalizeWhitespace(safeText(event.payload.packetHash));
+        if (packetHash) lastResumePacketHash = packetHash;
+      }
+
+      if (event.kind === "guard_decision") {
+        const decision = normalizeWhitespace(safeText(event.payload.decision)).toLowerCase();
+        const reason = normalizeWhitespace(safeText(event.payload.reason));
+        const command = normalizeWhitespace(safeText(event.payload.command));
+        if (decision === "block" && command) {
+          blockedActions.push(command);
+          doNotRepeat.push(command);
+        }
+        if (reason && (decision === "block" || decision === "warn")) {
+          openRisks.push(reason);
+        }
+      }
+
+      if (event.kind === "compaction_detected") {
+        const reason = normalizeWhitespace(
+          safeText(event.payload.reason || event.payload.pattern || "Context compaction detected")
+        );
+        if (reason) openRisks.push(reason);
+      }
+
+      if (event.kind === "process_restarted") {
+        const reason = normalizeWhitespace(
+          safeText(event.payload.reason || "Host process restarted")
+        );
+        if (reason) openRisks.push(reason);
       }
 
       if (event.kind === "error") {
@@ -272,6 +349,11 @@ export class DeterministicCheckpointCompiler {
     state.blockers = uniqueStrings(blockers);
     state.doNotRepeat = uniqueStrings(doNotRepeat);
     state.unresolvedQuestions = uniqueStrings(unresolvedQuestions);
+    state.lastResumePacketHash = lastResumePacketHash;
+    state.lastKnownWorkspaceState = lastKnownWorkspaceState;
+    state.openRisks = uniqueStrings(openRisks);
+    state.blockedActions = uniqueStrings(blockedActions);
+    state.recentSideEffects = uniqueStrings(recentSideEffects);
 
     if (!nextAction || nextAction === previous.nextAction) {
       const preferredPlan =
